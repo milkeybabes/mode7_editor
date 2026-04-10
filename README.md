@@ -32,6 +32,86 @@ Interactive editor for Mode7 projects.
 - Palette preview
 - Safe editing at 1:1 zoom+
 
+usage: mode7_editor.py [-h] [--palette PALETTE] [--chr CHR_FILE] [--map MAP_FILES] [--width WIDTH] [--height HEIGHT]
+                       [project]
+
+positional arguments:
+  project            Project name without .m7e extension
+
+options:
+  -h, --help         show this help message and exit
+  --palette PALETTE  SNES palette file (.pal, 512 bytes)
+  --chr CHR_FILE     Character file (.chr)
+  --map MAP_FILES    Map file (.map). Can be used multiple times for multi-map mode
+  --width WIDTH      Map width (default: 128)
+  --height HEIGHT    Map height (default: 128)
+
+This tool edits SNES Mode 7 projects using:
+  - one shared palette (.pal, SNES 512-byte format)
+  - one shared character set (.chr)
+  - one or more map files (.map)
+
+PROJECT MODE
+  python mode7_editor.py test_map
+
+  Loads:
+    test_map.m7e
+
+DIRECT FILE MODE
+  python mode7_editor.py --palette level.pal --chr level.chr --map level.map --width 128 --height 128
+
+DIRECT MULTI-MAP MODE
+  python mode7_editor.py --palette level.pal --chr level.chr --map map1.map --map map2.map --width 128 --height 128
+
+.M7E FORMAT
+  Example:
+    palette=test_map.pal
+    tiles=test_map.chr
+    maps=test_map_1.map,test_map_2.map,test_map_3.map
+    width=128
+    height=128
+
+  Older single-map projects are also supported:
+    map=test_map.map
+
+MOUSE CONTROLS
+  Tile sheet:
+    Left click   Select tile
+
+  Tile editor:
+    Left click   Paint pixel
+    Right click  Pick colour from pixel
+    Alt+Left     Pick colour (eyedropper)
+
+  Map editor:
+    Left click        Paint selected tile
+    Right click       Pick tile from map
+    Middle drag       Pan map
+    Mouse wheel       Zoom in/out
+    Left paint        Disabled below 1:1 zoom
+
+SHORTCUT KEYS
+  X           Flip X
+  Y           Flip Y
+  R           Rotate clockwise
+  Shift+R     Rotate anticlockwise
+  Delete      Clear tile
+  I           Invert tile
+  C           Copy tile
+  V           Paste tile
+  Ctrl+Z      Undo character edit
+  U           Undo last map paint
+
+SAVE BUTTONS
+  Save Project   Save all current project files
+  Save Map       Save current map only
+  Save Chr       Save character data only
+  Save Palette   Save palette only
+
+NOTES
+  - Palette editing uses 0-255 sliders in the UI
+  - Values are quantised immediately to valid SNES 5-bit steps
+  - Palette files are saved back in native SNES 16-bit format
 ### ✔ Examples
 
 ```bash
