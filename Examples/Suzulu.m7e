@@ -1,0 +1,5 @@
+palette=Maps\Suzulu.pal
+tiles=Maps\Suzulu.chr
+maps=Maps\Suzulu_1.map,Maps\Suzulu_2.map,Maps\Suzulu_3.map
+width=128
+height=128

@@ -1,0 +1,5 @@
+palette=Maps\Indoor_Pitch.pal
+tiles=Maps\Pitch.chr
+maps=Maps\Indoor_Pitch.map
+width=128
+height=128

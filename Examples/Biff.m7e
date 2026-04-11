@@ -1,0 +1,5 @@
+palette=Maps\Biff.pal
+tiles=Maps\Biff.chr
+maps=Maps\Biff_1.map,Maps\Biff_2.map,Maps\Biff_3.map
+width=128
+height=128

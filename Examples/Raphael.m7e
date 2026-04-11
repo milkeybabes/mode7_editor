@@ -1,0 +1,5 @@
+palette=Maps\Raphael.pal
+tiles=Maps\Raphael.chr
+maps=Maps\Raphael_1.map,Maps\Raphael_2.map,Maps\Raphael_3.map
+width=128
+height=128

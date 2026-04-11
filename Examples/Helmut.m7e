@@ -1,0 +1,5 @@
+palette=Maps\Helmut.pal
+tiles=Maps\Helmut.chr
+maps=Maps\Helmut_1.map,Maps\Helmut_2.map,Maps\Helmut_3.map
+width=128
+height=128

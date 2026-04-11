@@ -1,0 +1,5 @@
+palette=Maps\Surf.pal
+tiles=Maps\Surf.chr
+maps=Maps\Surf_1.map,Maps\Surf_2.map,Maps\Surf_3.map
+width=128
+height=128

@@ -1,0 +1,5 @@
+palette=Maps\Rumble.pal
+tiles=Maps\Rumble.chr
+maps=Maps\Rumble.map
+width=128
+height=128

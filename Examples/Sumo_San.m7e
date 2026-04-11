@@ -1,0 +1,5 @@
+palette=Maps\Sumo_San.pal
+tiles=Maps\Sumo_San.chr
+maps=Maps\Sumo_San_1.map,Maps\Sumo_San_2.map,Maps\Sumo_San_3.map
+width=128
+height=128

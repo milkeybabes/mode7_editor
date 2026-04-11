@@ -1,0 +1,5 @@
+palette=Maps\Hodja.pal
+tiles=Maps\Hodja.chr
+maps=Maps\Hodja_1.map,Maps\Hodja_2.map,Maps\Hodja_3.map
+width=128
+height=128

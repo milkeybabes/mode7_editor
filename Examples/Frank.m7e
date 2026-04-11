@@ -1,0 +1,5 @@
+palette=Maps\Frank.pal
+tiles=Maps\Frank.chr
+maps=Maps\Frank_1.map,Maps\Frank_2.map,Maps\Frank_3.map
+width=128
+height=128
