@@ -88,8 +88,14 @@ def save_tiles(path, tiles):
 def load_map(path):
     return bytearray(open(path, "rb").read())
 
+def ensure_project_filename(name):
+    if name.lower().endswith(".m7e"):
+        return name
+    return f"{name}.m7e"
+
+
 def load_project(name):
-    filename = f"{name}.m7e"
+    filename = ensure_project_filename(name)
 
     data = {}
     with open(filename, "r") as f:
@@ -102,26 +108,29 @@ def load_project(name):
     return data
 
 def create_project(name, width=128, height=128):
-    with open(f"{name}.m7e", "w") as f:
-        f.write(f"palette={name}.pal\n")
-        f.write(f"tiles={name}.chr\n")
-        f.write(f"maps={name}_1.map\n")
+    project_filename = ensure_project_filename(name)
+    project_base, _ = os.path.splitext(project_filename)
+
+    with open(project_filename, "w") as f:
+        f.write(f"palette={project_base}.pal\n")
+        f.write(f"tiles={project_base}.chr\n")
+        f.write(f"maps={project_base}_1.map\n")
         f.write(f"width={width}\n")
         f.write(f"height={height}\n")
 
     # palette (512 bytes)
-    save_default_palette(f"{name}.pal")
+    save_default_palette(f"{project_base}.pal")
 
     # tiles (start with 256 tiles)
     chr_data = bytearray()
     for tile_num in range(256):
         chr_data.extend([tile_num] * 64)
 
-    with open(f"{name}.chr", "wb") as f:
+    with open(f"{project_base}.chr", "wb") as f:
         f.write(chr_data)
 
     # first map
-    with open(f"{name}_1.map", "wb") as f:
+    with open(f"{project_base}_1.map", "wb") as f:
         f.write(bytearray(width * height))
 
 def rgb5_to_snes_word(r5, g5, b5):
@@ -1382,7 +1391,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "project",
         nargs="?",
-        help="Project name without .m7e extension"
+        help="Project name, with or without .m7e extension"
     )
     parser.add_argument(
         "--palette",
@@ -1417,9 +1426,10 @@ if __name__ == "__main__":
     # --- PROJECT MODE ---
     if args.project:
         project_name = args.project
+        project_filename = ensure_project_filename(project_name)
 
-        if not os.path.exists(f"{project_name}.m7e"):
-            print(f"Project '{project_name}' not found.")
+        if not os.path.exists(project_filename):
+            print(f"Project '{project_filename}' not found.")
             try:
                 create = input("Create new project? (y/n): ").strip().lower()
             except (EOFError, KeyboardInterrupt):
