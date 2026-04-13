@@ -3,11 +3,23 @@ import os
 import argparse
 import textwrap
 
+import faulthandler
+import traceback
+import signal
+
+faulthandler.enable()
+
+def excepthook(exc_type, exc_value, exc_tb):
+    print("UNCAUGHT PYTHON EXCEPTION:")
+    traceback.print_exception(exc_type, exc_value, exc_tb)
+
+sys.excepthook = excepthook
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-    QFileDialog, QScrollArea, QSizePolicy, QSlider
+    QFileDialog, QScrollArea, QSizePolicy, QSlider, QMessageBox
 )
-from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor
+from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QCursor
+
 from PySide6.QtCore import Qt
 
 TILE_SIZE = 8
@@ -93,7 +105,6 @@ def ensure_project_filename(name):
         return name
     return f"{name}.m7e"
 
-
 def load_project(name):
     filename = ensure_project_filename(name)
 
@@ -135,7 +146,6 @@ def create_project(name, width=128, height=128):
 
 def rgb5_to_snes_word(r5, g5, b5):
     return (b5 << 10) | (g5 << 5) | r5
-
 
 def save_default_palette(path):
     ramps = []
@@ -229,12 +239,29 @@ def rotate_tile_cw(tile):
     return out
 
 def rotate_tile_ccw(tile):
+    
     out = bytearray(64)
     for y in range(8):
         for x in range(8):
             out[y * 8 + x] = tile[x * 8 + (7 - y)]
     return out
 
+def validate_project_files(tiles_path, palette_path, map_paths):
+    
+    missing = []
+
+    if not os.path.isfile(tiles_path):
+        missing.append(tiles_path)
+
+    if not os.path.isfile(palette_path):
+        missing.append(palette_path)
+
+    for path in map_paths:
+        if not os.path.isfile(path):
+            missing.append(path)
+
+    return missing
+    
 class TileViewer(QLabel):
     def __init__(self, tiles, palette, parent):
         super().__init__()
@@ -450,7 +477,7 @@ class PaletteControls(QWidget):
         self.parent.palette_view.build()
         self.parent.tile_editor.build()
         self.parent.tile_view.build()
-        self.parent.map_view.redraw()
+        self.parent.map_view.rebuild_all()
         self.parent.update_status()
 
 class TileOps(QWidget):
@@ -518,7 +545,7 @@ class TileOps(QWidget):
         self.parent.modified_chr = True
         self.parent.tile_editor.build()
         self.parent.tile_view.build()
-        self.parent.map_view.redraw()
+        self.parent.map_view.update_all_instances_of_tile(self.parent.selected_tile)
         self.parent.update_status()
 
     def flip_x(self):
@@ -552,7 +579,7 @@ class TileOps(QWidget):
             self.replace_current_tile(bytearray(self.parent.copied_tile))
 
 class MapView(QLabel):
-    ZOOM_LEVELS = [0.125, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0]
+    ZOOM_LEVELS = [0.125, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0]
 
     def __init__(self, parent):
         super().__init__()
@@ -561,15 +588,21 @@ class MapView(QLabel):
         self.setMouseTracking(True)
         self.setCursor(Qt.ArrowCursor)
         self.setFocusPolicy(Qt.StrongFocus)
-        self.base_pixmap = None
-
+        self.base_image = None
+        self.grid_modes = [0, 16, 24, 32]
+        self.grid_index = 0
         self.panning = False
         self.pan_start = None
         self.h_scroll_start = 0
         self.v_scroll_start = 0
-
+        
         self.redraw()
 
+    def toggle_grid(self):
+        self.grid_index = (self.grid_index + 1) % len(self.grid_modes)
+        self.update()
+        self.parent.update_status()
+        
     def can_edit_map(self):
         return self.scale >= 1.0
 
@@ -590,11 +623,40 @@ class MapView(QLabel):
         except ValueError:
             return min(range(len(self.ZOOM_LEVELS)), key=lambda i: abs(self.ZOOM_LEVELS[i] - self.scale))
 
-    def set_scale(self, scale):
+    def set_scale(self, scale, anchor_widget_pos=None):
+        if self.base_image is None:
+            self.scale = scale
+            self.apply_zoom()
+            self.parent.update_status()
+            return
+
+        old_scale = self.scale
+        viewport = self.parent.map_scroll.viewport()
+        hbar = self.parent.map_scroll.horizontalScrollBar()
+        vbar = self.parent.map_scroll.verticalScrollBar()
+
+        if anchor_widget_pos is None:
+            viewport_anchor_x = viewport.width() // 2
+            viewport_anchor_y = viewport.height() // 2
+            widget_anchor_x = hbar.value() + viewport_anchor_x
+            widget_anchor_y = vbar.value() + viewport_anchor_y
+        else:
+            widget_anchor_x = anchor_widget_pos.x()
+            widget_anchor_y = anchor_widget_pos.y()
+            viewport_anchor_x = widget_anchor_x - hbar.value()
+            viewport_anchor_y = widget_anchor_y - vbar.value()
+
+        image_x = widget_anchor_x / old_scale
+        image_y = widget_anchor_y / old_scale
+
         self.scale = scale
         self.apply_zoom()
-        self.parent.update_status()
 
+        hbar.setValue(int(image_x * self.scale - viewport_anchor_x))
+        vbar.setValue(int(image_y * self.scale - viewport_anchor_y))
+
+        self.parent.update_status()
+        
     def redraw(self):
         p = self.parent
         w = p.map_width
@@ -613,25 +675,19 @@ class MapView(QLabel):
 
         painter.end()
 
-        self.base_pixmap = QPixmap.fromImage(img)
+        self.base_image = img
         self.apply_zoom()
 
     def apply_zoom(self):
-        if self.base_pixmap is None:
+        if self.base_image is None:
             return
 
-        scaled_w = max(1, int(round(self.base_pixmap.width() * self.scale)))
-        scaled_h = max(1, int(round(self.base_pixmap.height() * self.scale)))
+        w = max(1, int(round(self.base_image.width() * self.scale)))
+        h = max(1, int(round(self.base_image.height() * self.scale)))
 
-        scaled = self.base_pixmap.scaled(
-            scaled_w,
-            scaled_h,
-            Qt.KeepAspectRatio,
-            Qt.FastTransformation
-        )
-        self.setPixmap(scaled)
-        self.adjustSize()
-
+        self.resize(w, h)
+        self.update()
+                
     def zoom_in(self):
         idx = self.current_zoom_index()
         if idx < len(self.ZOOM_LEVELS) - 1:
@@ -643,15 +699,15 @@ class MapView(QLabel):
             self.set_scale(self.ZOOM_LEVELS[idx - 1])
 
     def fit_to_window(self):
-        if self.base_pixmap is None:
+        if self.base_image is None:
             return
 
         scroll = self.parent.map_scroll.viewport().size()
         if scroll.width() <= 0 or scroll.height() <= 0:
             return
 
-        scale_x = scroll.width() / self.base_pixmap.width()
-        scale_y = scroll.height() / self.base_pixmap.height()
+        scale_x = scroll.width() / self.base_image.width()
+        scale_y = scroll.height() / self.base_image.height()
         best = min(scale_x, scale_y)
 
         candidates = [z for z in self.ZOOM_LEVELS if z <= best]
@@ -694,7 +750,7 @@ class MapView(QLabel):
                 p.push_map_undo(idx)
                 p.map_data[idx] = p.selected_tile
                 p.modified_map = True
-                self.redraw()
+                self.update_tile(tx, ty)
                 p.update_status()
 
         elif event.button() == Qt.RightButton:
@@ -721,10 +777,12 @@ class MapView(QLabel):
             p.hover_x = tx
             p.hover_y = ty
             p.update_status()
+            self.update()
         else:
             p.hover_x = -1
             p.hover_y = -1
             p.update_status()
+            self.update()
 
         if not self.can_edit_map():
             return
@@ -738,7 +796,7 @@ class MapView(QLabel):
                 p.push_map_undo(idx)
                 p.map_data[idx] = p.selected_tile
                 p.modified_map = True
-                self.redraw()
+                self.update_tile(tx, ty)
                 p.update_status()
 
     def mouseReleaseEvent(self, event):
@@ -748,11 +806,10 @@ class MapView(QLabel):
             return
 
     def wheelEvent(self, event):
-        if self.base_pixmap is None:
+        if self.base_image is None:
             event.accept()
             return
 
-        old_scale = self.scale
         old_idx = self.current_zoom_index()
         delta = event.angleDelta().y()
 
@@ -764,25 +821,94 @@ class MapView(QLabel):
             event.accept()
             return
 
-        mouse_pos = event.position()
-        image_x = mouse_pos.x() / old_scale
-        image_y = mouse_pos.y() / old_scale
-
-        self.scale = new_scale
-        self.apply_zoom()
-
-        new_h = int(image_x * self.scale - mouse_pos.x())
-        new_v = int(image_y * self.scale - mouse_pos.y())
-
-        hbar = self.parent.map_scroll.horizontalScrollBar()
-        vbar = self.parent.map_scroll.verticalScrollBar()
-
-        hbar.setValue(new_h)
-        vbar.setValue(new_v)
-
-        self.parent.update_status()
+        self.set_scale(new_scale, event.position().toPoint())
         event.accept()
 
+    def get_tile_image(self, tile_index):
+        if not hasattr(self, "tile_cache"):
+            self.tile_cache = {}
+
+        if tile_index in self.tile_cache:
+            return self.tile_cache[tile_index]
+
+        tile = self.parent.tiles[tile_index]
+        img = render_tile(tile, self.parent.palette)
+        self.tile_cache[tile_index] = img
+        return img
+
+    def update_tile(self, mx, my):
+        idx = my * self.parent.map_width + mx
+        tile_index = self.parent.map_data[idx]
+
+        painter = QPainter(self.base_image)
+        tile_img = self.get_tile_image(tile_index)
+        painter.drawImage(mx * 8, my * 8, tile_img)
+        painter.end()
+
+        px = int(mx * 8 * self.scale)
+        py = int(my * 8 * self.scale)
+        pw = max(1, int(8 * self.scale))
+        ph = max(1, int(8 * self.scale))
+        self.update(px, py, pw, ph)
+
+    def update_all_instances_of_tile(self, tile_index):
+        self.tile_cache.pop(tile_index, None)
+
+        painter = QPainter(self.base_image)
+
+        for i, t in enumerate(self.parent.map_data):
+            if t == tile_index:
+                mx = i % self.parent.map_width
+                my = i // self.parent.map_width
+                painter.drawImage(mx * 8, my * 8, self.get_tile_image(tile_index))
+
+        painter.end()
+        self.update()
+
+    def rebuild_all(self):
+        self.tile_cache = {}
+        self.redraw()
+        
+    def paintEvent(self, event):
+        if self.base_image is None:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
+        painter.scale(self.scale, self.scale)
+        painter.drawImage(0, 0, self.base_image)
+
+        grid_size = self.grid_modes[self.grid_index]
+        if grid_size > 0:
+            pen = QPen(QColor(255, 255, 255, 80))
+            pen.setWidthF(0)
+            painter.setPen(pen)
+
+            w = self.base_image.width()
+            h = self.base_image.height()
+
+            for x in range(0, w, grid_size):
+                painter.drawLine(x, 0, x, h)
+
+            for y in range(0, h, grid_size):
+                painter.drawLine(0, y, w, y)
+
+        if 0 <= self.parent.hover_x < self.parent.map_width and 0 <= self.parent.hover_y < self.parent.map_height:
+            pen = QPen(QColor(255, 0, 0, 180))
+            pen.setWidthF(0)
+            painter.setPen(pen)
+
+            x = self.parent.hover_x * 8
+            y = self.parent.hover_y * 8
+            painter.drawRect(x, y, 8, 8)
+            
+    def leaveEvent(self, event):
+        self.parent.hover_x = -1
+        self.parent.hover_y = -1
+        self.parent.update_status()
+        self.update()
+        super().leaveEvent(event)
+    
 class Editor(QWidget):
     def __init__(self, tiles_path, palette_path, map_paths, width, height):        
         super().__init__()
@@ -793,12 +919,18 @@ class Editor(QWidget):
         self.tiles_path = tiles_path
         self.palette_path = palette_path
  
-        self.tiles = load_tiles(self.tiles_path)
-        self.palette = load_palette_snes(self.palette_path)
- 
         self.map_paths = map_paths
         self.map_index = 0
 
+        missing = validate_project_files(self.tiles_path, self.palette_path, self.map_paths)
+        if missing:
+            msg = "The following project file(s) are missing:\n\n" + "\n".join(missing)
+            QMessageBox.critical(self, "Missing Project File", msg)
+            raise SystemExit(1)
+
+        self.tiles = load_tiles(self.tiles_path)
+        self.palette = load_palette_snes(self.palette_path)
+             
         self.map_data_list = [load_map(p) for p in self.map_paths]
         self.map_data = self.map_data_list[self.map_index]
         self.map_path = self.map_paths[self.map_index]
@@ -910,6 +1042,9 @@ class Editor(QWidget):
         controls.addWidget(zoom_out_btn)
         controls.addWidget(zoom_in_btn)
         controls.addWidget(fit_btn)
+        grid_btn = QPushButton("Grid")
+        grid_btn.clicked.connect(self.map_view.toggle_grid)
+        controls.addWidget(grid_btn)
         controls.addWidget(self.status)
         controls.addWidget(prev_map_btn)
         controls.addWidget(self.map_label)
@@ -947,9 +1082,16 @@ class Editor(QWidget):
         if mods:
             mod_text = "   *modified: " + ",".join(mods) + "*"
 
+        grid_size = self.map_view.grid_modes[self.map_view.grid_index]
+        if grid_size == 0:
+            grid_text = "   Grid: Off"
+        else:
+            grid_text = f"   Grid: {grid_size}x{grid_size}"
+
         self.status.setText(
-            f"Selected tile: {self.selected_tile}   Colour: {self.selected_color}   Zoom: {zoom}{edit_mode}{hover_text}{mod_text}"
+            f"Selected tile: {self.selected_tile}   Colour: {self.selected_color}   Zoom: {zoom}{edit_mode}{hover_text}{mod_text}{grid_text}"
         )
+
         self.update_window_title()
         total = len(self.map_paths)
         current = self.map_index + 1
@@ -991,16 +1133,23 @@ class Editor(QWidget):
                     proj[k.strip()] = v.strip()
 
         # reload data
-        self.tiles_path = proj["tiles"]
-        self.palette_path = proj["palette"]
+        tiles_path = proj["tiles"]
+        palette_path = proj["palette"]
 
         if "maps" in proj:
-            self.map_paths = [p.strip() for p in proj["maps"].split(",") if p.strip()]
+            map_paths = [p.strip() for p in proj["maps"].split(",") if p.strip()]
         elif "map" in proj:
-            self.map_paths = [proj["map"].strip()]
+            map_paths = [proj["map"].strip()]
         else:
-            raise ValueError("Project must define 'map' or 'maps'")
+            map_paths = []
 
+        missing = validate_project_files(tiles_path, palette_path, map_paths)
+        if missing:
+            print("Missing project file(s):")
+            for path in missing:
+                print(f"  {path}")
+            sys.exit(1)
+    
         self.map_width = int(proj.get("width", 128))
         self.map_height = int(proj.get("height", 128))
 
